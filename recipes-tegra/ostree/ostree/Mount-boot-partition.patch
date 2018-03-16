@@ -1,0 +1,59 @@
+From 33642082578946fdc73ade8b78c05ba8d8521652 Mon Sep 17 00:00:00 2001
+From: Gatis Paeglis <gatis.paeglis@theqtcompany.com>
+Date: Mon, 7 Mar 2016 15:17:34 +0100
+Subject: [PATCH] ostree: Mount boot partition from user space
+
+In the current approach we assumed that boot/
+
+- is on a separate boot partition
+- boot partition is right before rootfs partition
+- rootfs parition is provided as a *device node*
+- has "ext2" filesystem (mount shell cmd tries to
+  auto detect FS type, mount system call does not.)
+
+The new approch does not assume any of the above, and
+moves this logic from early user space (initramfs) to
+user space. Initramfs by design should be used only to
+prepare the rootfs, other tasks should be done later.
+---
+ src/switchroot/ostree-remount.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/src/switchroot/ostree-remount.c b/src/switchroot/ostree-remount.c
+index b8d3a96..33f2645 100644
+--- a/src/switchroot/ostree-remount.c
++++ b/src/switchroot/ostree-remount.c
+@@ -77,7 +77,7 @@ maybe_mount_tmpfs_on_var (void)
+ int
+ main(int argc, char *argv[])
+ {
+-  const char *remounts[] = { "/sysroot", "/etc", "/home", "/root", "/tmp", "/var", NULL };
++  const char *remounts[] = { "/sysroot", "/etc", "/home", "/root", "/tmp", "/var", "/boot", NULL };
+   struct stat stbuf;
+   int i;
+ 
+@@ -117,5 +117,22 @@ main(int argc, char *argv[])
+ 
+   maybe_mount_tmpfs_on_var ();
+ 
++  /* ostree-prepare-root mounts boot/ if it is on the same partition as root filesystem.
++   * If boot/ is not mounted, then it must be on a different partition. Try to mount
++   * filesystem where LABEL=boot-ostree.
++   */
++  if (!(lstat ("/boot/loader", &stbuf) == 0 && S_ISLNK (stbuf.st_mode)))
++    {
++      /* mount the real boot parition over the deployment's boot directory */
++      const char *mount_cmd="mount LABEL=boot-ostree /boot";
++      FILE *fp = popen (mount_cmd, "w");
++      if (fp == NULL)
++        {
++          perrorv ("popen failed for: %s", mount_cmd);
++          exit (EXIT_FAILURE);
++        }
++      pclose (fp);
++    }
++
+   exit (EXIT_SUCCESS);
+ }
+-- 
+2.7.0

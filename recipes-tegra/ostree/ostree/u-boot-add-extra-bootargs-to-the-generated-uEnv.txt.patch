@@ -1,0 +1,16 @@
+This patch add support for changinf bootargs argument to extra-bootargs , it will help to append ostree argument to kernel command line arguments.
+diff --git a/src/libostree/ostree-bootloader-uboot.c b/src/libostree/ostree-bootloader-uboot.c
+index 14a665f..0672a17 100644
+--- a/src/libostree/ostree-bootloader-uboot.c
++++ b/src/libostree/ostree-bootloader-uboot.c
+@@ -195,7 +195,9 @@ create_config_from_boot_loader_entries (OstreeBootloaderUboot     *self,
+       const char *uenv_path = NULL;
+       const char *ostree_arg = NULL;
+ 
+-      g_ptr_array_add (new_lines, g_strdup_printf ("bootargs=%s", val));
++//      g_ptr_array_add (new_lines, g_strdup_printf ("bootargs=%s", val));
++      g_ptr_array_add (new_lines, g_strdup_printf ("ostree_bootargs=%s", val));
++
+ 
+       /* Append system's uEnv.txt, if it exists in $deployment/usr/lib/ostree-boot/ */
+       kargs = _ostree_kernel_args_from_string (val);

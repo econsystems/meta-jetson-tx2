@@ -1,0 +1,17 @@
+SRC_URI_remove = "file://0002-Revert-check-FP16-build-condition-correctly.patch"
+
+inherit cuda
+
+EXTRA_OECMAKE_append_tegra210 = ' -DWITH_CUDA=ON -DCUDA_ARCH_BIN="5.3" -DCUDA_ARCH_PTX=""'
+EXTRA_OECMAKE_append_tegra186 = ' -DWITH_CUDA=ON -DCUDA_ARCH_BIN="6.1" -DCUDA_ARCH_PTX=""'
+
+# See here (https://docs.opencv.org/trunk/d6/d15/tutorial_building_tegra_cuda.html) 
+# for the recommended flags.
+# Standard opencv_3.3 recipe from meta-oe does not include OpenMP, so I'm adding it here.
+EXTRA_OECMAKE_append_tegra124 = '       \
+    -DWITH_CUDA=ON                      \
+    -DCUDA_ARCH_BIN="3.2"               \
+    -DCUDA_ARCH_PTX=""                  \
+    -DENABLE_NEON=ON                    \
+    -DWITH_OPENMP=ON                    \
+  '

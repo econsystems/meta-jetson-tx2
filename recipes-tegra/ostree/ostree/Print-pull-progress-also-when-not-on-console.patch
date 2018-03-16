@@ -1,0 +1,93 @@
+From b24d691d968bca608142882b453e98ed5ee267e9 Mon Sep 17 00:00:00 2001
+From: Gatis Paeglis <gatis.paeglis@qt.io>
+Date: Thu, 29 Sep 2016 11:46:59 +0200
+Subject: [PATCH] Print pull progress also when not on console
+
+glnx_console_text is smart enough:
+
+"On a tty, print to the console @text followed by an ASCII art
+ progress bar whose percentage is @percentage.  If stdout is not a
+ tty, a more basic line by line change will be printed."
+
+Otherwise, when pulling a lot of data, we do not get any feedback
+in a GUI application for a significant amount of time.
+---
+ src/ostree/ot-admin-builtin-switch.c  |  3 +--
+ src/ostree/ot-admin-builtin-upgrade.c |  3 +--
+ src/ostree/ot-builtin-pull-local.c    |  3 +--
+ src/ostree/ot-builtin-pull.c          | 12 ++++--------
+ 4 files changed, 7 insertions(+), 14 deletions(-)
+
+diff --git a/src/ostree/ot-admin-builtin-switch.c b/src/ostree/ot-admin-builtin-switch.c
+index 895538a..7f1d6dd 100644
+--- a/src/ostree/ot-admin-builtin-switch.c
++++ b/src/ostree/ot-admin-builtin-switch.c
+@@ -126,8 +126,7 @@ ot_admin_builtin_switch (int argc, char **argv, GCancellable *cancellable, GErro
+   { g_auto(GLnxConsoleRef) console = { 0, };
+     glnx_console_lock (&console);
+ 
+-    if (console.is_tty)
+-      progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
++    progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
+ 
+     /* Always allow older...there's not going to be a chronological
+      * relationship necessarily.
+diff --git a/src/ostree/ot-admin-builtin-upgrade.c b/src/ostree/ot-admin-builtin-upgrade.c
+index 81f9bb6..8147b4f 100644
+--- a/src/ostree/ot-admin-builtin-upgrade.c
++++ b/src/ostree/ot-admin-builtin-upgrade.c
+@@ -109,8 +109,7 @@ ot_admin_builtin_upgrade (int argc, char **argv, GCancellable *cancellable, GErr
+   { g_auto(GLnxConsoleRef) console = { 0, };
+     glnx_console_lock (&console);
+ 
+-    if (console.is_tty)
+-      progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
++    progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
+ 
+     if (opt_allow_downgrade)
+       upgraderpullflags |= OSTREE_SYSROOT_UPGRADER_PULL_FLAGS_ALLOW_OLDER;
+diff --git a/src/ostree/ot-builtin-pull-local.c b/src/ostree/ot-builtin-pull-local.c
+index 5401a28..f2f5b21 100644
+--- a/src/ostree/ot-builtin-pull-local.c
++++ b/src/ostree/ot-builtin-pull-local.c
+@@ -159,8 +159,7 @@ ostree_builtin_pull_local (int argc, char **argv, GCancellable *cancellable, GEr
+     g_variant_builder_add (&builder, "{s@v}", "depth",
+                            g_variant_new_variant (g_variant_new_int32 (opt_depth)));
+ 
+-    if (console.is_tty)
+-      progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
++    progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
+ 
+     opts = g_variant_ref_sink (g_variant_builder_end (&builder));
+     if (!ostree_repo_pull_with_options (repo, src_repo_uri, 
+diff --git a/src/ostree/ot-builtin-pull.c b/src/ostree/ot-builtin-pull.c
+index 99b2593..78686b3 100644
+--- a/src/ostree/ot-builtin-pull.c
++++ b/src/ostree/ot-builtin-pull.c
+@@ -242,20 +242,16 @@ ostree_builtin_pull (int argc, char **argv, GCancellable *cancellable, GError **
+ 
+     if (!opt_dry_run)
+       {
+-        if (console.is_tty)
+-          progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
++        progress = ostree_async_progress_new_and_connect (ostree_repo_pull_default_console_progress_changed, &console);
+       }
+     else
+       {
+         progress = ostree_async_progress_new_and_connect (dry_run_console_progress_changed, NULL);
+       }
+ 
+-    if (console.is_tty)
+-      {
+-        signal_handler_id = g_signal_connect (repo, "gpg-verify-result",
+-                                              G_CALLBACK (gpg_verify_result_cb),
+-                                              &console);
+-      }
++    signal_handler_id = g_signal_connect (repo, "gpg-verify-result",
++                                          G_CALLBACK (gpg_verify_result_cb),
++                                          &console);
+ 
+     if (!ostree_repo_pull_with_options (repo, remote, g_variant_builder_end (&builder),
+                                         progress, cancellable, error))
+-- 
+2.7.4

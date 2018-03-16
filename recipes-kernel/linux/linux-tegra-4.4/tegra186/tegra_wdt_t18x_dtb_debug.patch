@@ -1,0 +1,13 @@
+diff --git a/nvidia/soc/t18x/kernel-dts/tegra186-soc/tegra186-soc-base.dtsi b/nvidia/soc/t18x/kernel-dts/tegra186-soc/tegra186-soc-base.dtsi
+index 5c6536b..5749bc4 100644
+--- a/nvidia/soc/t18x/kernel-dts/tegra186-soc/tegra186-soc-base.dtsi
++++ b/nvidia/soc/t18x/kernel-dts/tegra186-soc/tegra186-soc-base.dtsi
+@@ -2190,7 +2190,7 @@
+ 		nvidia,extend-watchdog-suspend;
+ 		timeout-sec = <120>;
+ 		nvidia,disable-debug-reset;
+-		status = "disabled";
++		status = "okay";
+ 	};
+ 
+ 	tegra_fiq_debugger {

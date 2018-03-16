@@ -1,0 +1,11 @@
+--- a/psplash.c	2015-08-14 11:12:46.496448273 +0530
++++ b/psplash.c	2015-08-14 11:13:32.196448229 +0530
+@@ -21,7 +21,7 @@
+ #include "psplash.h"
+ #include "psplash-config.h"
+ #include "psplash-colors.h"
+-#include "psplash-poky-img.h"
++#include "../psplash-econ-img.h"
+ #include "psplash-bar-img.h"
+ #include "radeon-font.h"
+ 

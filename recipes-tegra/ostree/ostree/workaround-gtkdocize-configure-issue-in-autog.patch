@@ -1,0 +1,26 @@
+From 0b6711e10d36060d80962472c892c60e8a403422 Mon Sep 17 00:00:00 2001
+From: Mikko Gronoff <mikko.gronoff@qt.io>
+Date: Thu, 2 Feb 2017 13:38:54 +0200
+Subject: [PATCH] ostree: workaround gtkdocize configure issue in autogen.sh
+
+Building meta-boot2qt morty branch content with poky 2.2.1 causes
+build break in ostree autogen.sh. Called gtkdocize script uses wrong
+docdir thus causing error trying to remove gtk-doc.make in wrong
+location
+---
+ autogen.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/autogen.sh b/autogen.sh
+index 0f32089..f473fdc 100755
+--- a/autogen.sh
++++ b/autogen.sh
+@@ -25,7 +25,7 @@ EXTRA_DIST =
+ CLEANFILES =
+ EOF
+ else
+-        gtkdocize
++        gtkdocize --docdir $srcdir --srcdir $srcdir
+ fi
+ 
+ cd $olddir

@@ -1,0 +1,54 @@
+From c7cf5cb80c57423e707d87013050c6f9cc6f6d37 Mon Sep 17 00:00:00 2001
+From: Gatis Paeglis <gatis.paeglis@qt.io>
+Date: Tue, 18 Oct 2016 12:19:57 +0200
+Subject: [PATCH] Workaround the SIGCHLD handler issue
+
+REF: https://bugreports.qt.io/browse/QTBUG-56338
+---
+ src/libostree/ostree-bootloader-grub2.c | 30 ++++++++++++++++++++++--------
+ 1 file changed, 22 insertions(+), 8 deletions(-)
+
+diff --git a/src/libostree/ostree-bootloader-grub2.c b/src/libostree/ostree-bootloader-grub2.c
+index f3dc8e1..2c60b80 100644
+--- a/src/libostree/ostree-bootloader-grub2.c
++++ b/src/libostree/ostree-bootloader-grub2.c
+@@ -380,14 +380,28 @@ _ostree_bootloader_grub2_write_config (OstreeBootloader      *bootloader,
+ 
+      Upstream is fixed though.
+   */
+-  proc = g_subprocess_launcher_spawn (launcher, error,
+-                                      grub_exec, "-o",
+-                                      gs_file_get_path_cached (new_config_path),
+-                                      NULL);
+-
+-  if (!g_subprocess_wait_check (proc, cancellable, error))
+-    goto out;
+-
++  //proc = g_subprocess_launcher_spawn (launcher, error,
++  //                                    grub_exec, "-o",
++  //                                    gs_file_get_path_cached (new_config_path),
++  //                                    NULL);
++
++  //if (!g_subprocess_wait_check (proc, cancellable, error))
++  //  goto out;
++  {
++    // REF: https://bugreports.qt.io/browse/QTBUG-56338
++    // We do not use the chroot (grub2_child_setup) code path, so we do not
++    // care about GSubprocessLauncher and the custom envvars passed to it.
++    const char *cmd = glnx_strjoina (grub_exec, " -o ", gs_file_get_path_cached (new_config_path));
++    FILE *fp = popen(cmd, "r");
++    if (!fp) {
++      glnx_set_prefix_error_from_errno (error, "popen (%s)", cmd);
++      goto out;
++    }
++    if (pclose(fp) == -1) {
++      glnx_set_prefix_error_from_errno (error, "pclose (%s)", cmd);
++      goto out;
++    }
++  } 
+   /* Now let's fdatasync() for the new file */
+   { glnx_fd_close int new_config_fd = open (gs_file_get_path_cached (new_config_path), O_RDONLY | O_CLOEXEC);
+     if (new_config_fd < 0)
+-- 
+2.7.4
+

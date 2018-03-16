@@ -1,0 +1,394 @@
+diff --git a/arch/arm/mach-tegra/board186.c b/arch/arm/mach-tegra/board186.c
+index 8499592..8db0dee 100644
+--- a/arch/arm/mach-tegra/board186.c
++++ b/arch/arm/mach-tegra/board186.c
+@@ -8,9 +8,103 @@
+ #include <asm/arch/tegra.h>
+ #include <asm/arch-tegra/mmc.h>
+ #include <asm/arch-tegra/tegra_mmc.h>
++#include <asm/io.h>
++
++/* PMC RST STATUS Regs */
++#define PMC_RST_STATUS 0x0c360070
++#define PMC_RST_SOURCE_MASK 0x3C
++#define PMC_RST_SOURCE_SHIFT 0x2
++#define PMC_RST_LEVEL_MASK 0x3
++#define PMC_RST_LEVEL_SHIFT 0x0
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++#ifdef ECON_OTA_SUPPORT
++/* OTA_FALLBACK_HANDLE
++* Check for Last Reset Reason
++*/
++int ota_fallback_handle(void)
++{
++	u32 rst_val, rst_src, rst_lvl;
++	char *b,*commit_id;
++        unsigned long bootcount; //bootcount
++        char *reset_source[] = {
++                "Power on reset",
++                "AOWDT",
++                "Denvor watchdog time out",
++                "BPMPWDT",
++                "SCEWDT",
++                "SPEWDT",
++                "APEWDT",
++                "A57 watchdog time out",
++                "SENSOR",
++                "AOTAG",
++                "VFSENSOR",
++                "Software reset",
++                "SC7",
++                "HSM",
++                "CSITE",
++        };
++
++        rst_val = readl(PMC_RST_STATUS);
++        rst_src = (rst_val & PMC_RST_SOURCE_MASK) >> PMC_RST_SOURCE_SHIFT;
++        rst_lvl = (rst_val & PMC_RST_LEVEL_MASK) >> PMC_RST_LEVEL_SHIFT;
++        if( rst_src == 0x0 )
++        {
++		/* POR RESET */
++                printf("### PMC reset source: %s\n", reset_source[rst_src]);
++		setenv ("BOOT_FAILURE_COMMIT_ID", "NONE" );
++                setenv ("BOOT_FAILURE_REASON" , "NONE" );
++                setenv_ulong("bootcount", 1 );
++                saveenv();
++        }
++        else
++        {
++		/* FIX ME : WDOG Reset doesn't occur properly , So fallback mechanism handles for all other resets other than POR */
++                printf("### PMC reset source: %s\n", reset_source[rst_src]);
++		b = getenv ("bootcount");
++                bootcount = b ? (int)simple_strtoul(b, NULL, 10) : bootcount;
++                bootcount++;
++                setenv_ulong("bootcount", bootcount);
++
++               if( (!strcmp(getenv("stage"),"6")) && (!strcmp(getenv("status"),"FAIL")))
++               {
++                       commit_id = getenv ("commit_id");
++                      setenv ("BOOT_FAILURE_COMMIT_ID", commit_id );
++                       setenv ("BOOT_FAILURE_REASON" , "Kernel/DTB/Initramfs is not for this board" );
++               }
++               else if( (!strcmp(getenv("stage"),"7")) && (!strcmp(getenv("status"),"FAIL")))
++               {
++                       commit_id = getenv ("commit_id");
++                        setenv ("BOOT_FAILURE_COMMIT_ID", commit_id );
++                        setenv ("BOOT_FAILURE_REASON" , "Initramfs fails to do OSTree mount integration" );
++               }
++               else if( (!strcmp(getenv("stage"),"8")) && (!strcmp(getenv("status"),"FAIL")))
++               {
++                       commit_id = getenv ("commit_id");
++                        setenv ("BOOT_FAILURE_COMMIT_ID", commit_id );
++                        setenv ("BOOT_FAILURE_REASON" , "Fails to launch rootfs(sysroot)" );
++               }
++               else if( (!strcmp(getenv("stage"),"9")) && (!strcmp(getenv("status"),"FAIL")))
++                {
++                        commit_id = getenv ("commit_id");
++                        setenv ("BOOT_FAILURE_COMMIT_ID", commit_id );
++                               setenv ("BOOT_FAILURE_REASON" , "Fails to launch target application" );
++                }
++                saveenv();
++
++        }
++	return 0;
++}
++void arch_preboot_os(void)
++{
++	printf("set stage 6\n");
++        setenv ( "stage" , "6" );
++        saveenv();
++}
++
++#endif
++
+ int board_early_init_f(void)
+ {
+ 	return 0;
+@@ -33,6 +127,9 @@ __weak int cboot_init_late(void)
+ 
+ int board_late_init(void)
+ {
++#if defined(ECON_OTA_SUPPORT)
++	 ota_fallback_handle();
++#endif
+ 	return cboot_init_late();
+ }
+ 
+diff --git a/cmd/Makefile b/cmd/Makefile
+index a1731be..9afc375 100644
+--- a/cmd/Makefile
++++ b/cmd/Makefile
+@@ -161,3 +161,4 @@ obj-$(CONFIG_CMD_BLOB) += blob.o
+ # core command
+ obj-y += nvedit.o
+ obj-y += disk.o
++obj-$(CONFIG_TEGRA_T18X_WATCHDOG) += wdt.o
+diff --git a/cmd/wdt.c b/cmd/wdt.c
+new file mode 100644
+index 0000000..6f39c26
+--- /dev/null
++++ b/cmd/wdt.c
+@@ -0,0 +1,107 @@
++/*
++ * Copyright 2000-2009
++ * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <command.h>
++#include <watchdog.h>
++#include <asm/io.h>
++
++/* Watchdog and Timer Registers */
++#define WDT_SOURCE 			0x30c0000
++#define WDT_TIMER 			0x3090000
++#define WDT_TKE 			0x3010000
++#define WDT_UNLOCK_PATTERN              (0xC45A << 0)
++#define WDT_UNLOCK                      (WDT_SOURCE + 0xC)
++#define WDT_CMD                         (WDT_SOURCE + 0x8)
++#define WDT_CMD_DISABLE_COUNTER         BIT(1)
++#define WDT_CMD_START_COUNTER           BIT(0)
++#define TOP_TKE_TMR_PCR_INTR            BIT(30)
++#define TMR_STATUS                 	(WDT_TIMER  + 0x4)
++#define TKE_TOP_SHARED_TKEIE7_0         (WDT_TKE + 0x11c)
++#define TOP_TKE_TKEIE_WDT_MASK(i)       (1 << (16 + 4 * (i)))
++#define WDT_INDEX 			0
++#define WDT_TIMEOUT			30
++#define ACTIVE_COUNT            	4 /* Used Active count value as calculated in Kernel tegra_wdt_t18x driver */
++#define TOP_TKE_TMR_EN                  BIT(31)
++#define TOP_TKE_TMR_PERIODIC            BIT(30)
++#define USEC_PER_SEC    1000000L
++
++
++void wdt_start(void)
++{
++	u32 val;
++	/* Sequence to enable the watchdog */
++	printf("Start WDOG\n");
++	/* Stop Watchdog First */
++	/* Write UnlockPattern 0x0000_C45A to Watchdog Timer Unlock Register */
++	writel(WDT_UNLOCK_PATTERN, WDT_UNLOCK);
++	/* Set Disable Counter bit in Watchdog Timer Command Register */
++        writel(WDT_CMD_DISABLE_COUNTER, WDT_CMD);
++	/* Clear Timer Configuration Register */
++        writel(0x00000000, WDT_TIMER);
++
++	/* Start Watchdog Timer */
++	/* Clear the interrupt bit in Timer Status Register */
++	writel(TOP_TKE_TMR_PCR_INTR, TMR_STATUS);
++	/* Unmask IRQ. This has to be called after every WDT power gate */
++	writel(TOP_TKE_TKEIE_WDT_MASK(WDT_INDEX), TKE_TOP_SHARED_TKEIE7_0);
++	/* Clear the interrupt bit in Timer Status Register */
++        writel(TOP_TKE_TMR_PCR_INTR, TMR_STATUS);
++	/* Write Timeout Value to Timer Configuration Register, And set TMR_EN and TMR_PERIODIC bit in Timer Configuration Register */
++	/* Timeout 30 Secs */
++	val = (WDT_TIMEOUT * USEC_PER_SEC) / ACTIVE_COUNT;
++	val |= (TOP_TKE_TMR_EN | TOP_TKE_TMR_PERIODIC);
++	writel(val, WDT_TIMER);
++	/* Set Start Counter Bit in Watchdog Timer Command Register */
++	writel(WDT_CMD_START_COUNTER, WDT_CMD);
++}
++
++void wdt_stop(void)
++{
++        printf("Stop WDOG\n");
++	/* Write UnlockPattern 0x0000_C45A to Watchdog Timer Unlock Register */
++        writel(WDT_UNLOCK_PATTERN, WDT_UNLOCK);
++        /* Set Disable Counter bit in Watchdog Timer Command Register */
++        writel(WDT_CMD_DISABLE_COUNTER, WDT_CMD);
++        /* Clear Timer Configuration Register */
++        writel(0x00000000, WDT_TIMER);
++}
++
++static int do_wdt(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
++{
++
++	switch (argc) {
++	case 2:
++		if (strncmp (argv[1], "start", 5) == 0)
++		{
++			wdt_start();
++		}
++		else if (strncmp (argv[1], "stop", 4) == 0)
++		{
++			wdt_stop();
++		}
++		else
++		{
++			printf ("Usage:\n\n");
++			return CMD_RET_USAGE;
++		}
++		break;
++	default:
++		printf ("Usage:\n\n");
++		return CMD_RET_USAGE;
++	}
++
++
++	return 0;
++
++}
++U_BOOT_CMD (
++	wdt, 3, 1, do_wdt,
++		"wdt - command to manipulate watchdog",
++		"start - Initailize and enable watchdog\n"
++		"stop - stop watchdog\n"
++	   );
+diff --git a/include/configs/p2771-0000.h b/include/configs/p2771-0000.h
+index 1f64405..6a5cac6 100644
+--- a/include/configs/p2771-0000.h
++++ b/include/configs/p2771-0000.h
+@@ -33,6 +33,123 @@
+ #define CONFIG_PCI_PNP
+ #define CONFIG_CMD_PCI
+ 
++#define ECON_OTA_SUPPORT
++#if defined(ECON_OTA_SUPPORT)
++#define CONFIG_CMD_IMI
++#define CONFIG_TEGRA_T18X_WATCHDOG
++#define CONFIG_BOOTCOMMAND \
++	"wdt start;" \
++	"setenv stage 1;" \
++	"setenv status FAIL;" \
++	"run ota_bootcmd_mmc1"
++#define BOARD_EXTRA_ENV_SETTINGS \
++       "ota_bootargs=setenv bootargs root=/dev/mmcblk1p1 rw rootwait console=ttyS0,115200n8 OS=l4t fbcon=map:0 net.ifnames=0 "\
++	"memtype=0 video=tegrafb no_console_suspend=1 earlycon=uart8250,mmio32,0x03100000 nvdumper_reserved=0x2772e0000 gpt " \
++	"tegraid=18.1.2.0.0  tegra_keep_boot_clocks maxcpus=6 androidboot.serialno=0324217126594 bl_prof_dataptr=0x10000@0x277240000 " \
++	"sdhci_tegra.en_boot_part_access=1 ${ostree_bootargs} panic=30\0" \
++       "boot_dir=/boot\0" \
++       "fdtfile=devicetree-Image-tegra186-quill-p3310-1000-c03-00-base.dtb\0" \
++       "verify=n\0" \
++       "bootcount=1\0" \
++       "console=ttyS0,115200n8\0" \
++       "bootenv=/boot/uEnv.txt\0" \
++       "filesize=0x400\0" \
++       "bootpart=1:1\0" \
++       "boot_fdt=try\0" \
++       "fdt_addr=0x92000000\0" \
++       "importbootenv=echo Importing environment from mmc ...; " \
++               "env import -t -r $loadaddr $filesize\0" \
++       "loadramdisk=ext4load mmc ${bootpart} ${ramdisk_addr_r} ${boot_dir}/${ramdisk_image}\0" \
++       "loadimage=ext4load mmc ${bootpart} ${loadaddr} ${boot_dir}/${kernel_image}\0" \
++       "loadfdt=ext4load mmc ${bootpart} ${fdt_addr} ${boot_dir}${bootdir}${fdtfile}\0" \
++       "verify_ramdisk=iminfo $ramdisk_addr_r\0" \
++       "boot_images=booti ${loadaddr} ${ramdisk_addr_r} ${fdt_addr}\0" \
++       "loadbootscript=load mmc ${mmcdev} ${loadaddr} boot.scr\0" \
++       "loadbootenv=ext4load mmc ${bootpart} ${loadaddr} ${bootenv}\0" \
++       "mmcdev=1\0" \
++       "mmcloados=run ota_bootargs; " \
++               "if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
++                       "if run loadfdt; then " \
++                               "setenv status FAIL;" \
++                                "setenv stage 4;" \
++                                "saveenv;" \
++                               "echo Verifying Checksum;" \
++                               "if run verify_ramdisk; then " \
++                                        "setenv status FAIL;" \
++                                        "setenv stage 6;" \
++                                       "saveenv;" \
++                                "else " \
++                                        "setenv BOOT_FAILURE_COMMIT_ID ${commit_id};" \
++                                       "setenv BOOT_FAILURE_REASON Ramfs - Checksum Verification fails;" \
++                                       "saveenv;" \
++                                "fi; " \
++                                "if run boot_images; then " \
++                                        "setenv status FAIL;" \
++                                        "setenv stage 6;" \
++                                       "saveenv;" \
++                                "else " \
++                                        "setenv BOOT_FAILURE_COMMIT_ID ${commit_id};" \
++                                       "setenv BOOT_FAILURE_REASON bootm commands fails;" \
++                                        "saveenv;" \
++                                "fi; " \
++                       "else " \
++                               "setenv BOOT_FAILURE_COMMIT_ID ${commit_id};" \
++                                "setenv BOOT_FAILURE_REASON kernel image not found/empty;" \
++                                "saveenv;" \
++                                "exit;" \
++                       "fi; " \
++               "else " \
++                       "booti; " \
++               "fi;\0" \
++       "ota_bootcmd_mmc1=mmc dev ${mmcdev}; " \
++               "if mmc rescan; then " \
++                       "echo SD/MMC found on device ${mmcdev};" \
++                       "if run loadbootscript; then " \
++                               "run bootscript;" \
++                       "else " \
++                               "if test ${bootcount} = 3; then " \
++                                       "echo ota_fallback;" \
++                                       "setenv bootcount 1;" \
++                                       "setenv bootenv /boot/uEnv.txt_prev;" \
++                                       "saveenv;" \
++                               "else " \
++                                       "setenv bootenv /boot/uEnv.txt;" \
++                                       "saveenv;" \
++                               "fi; " \
++                               "if run loadbootenv; then " \
++                                       "echo Loaded environment from ${bootenv};" \
++                                       "run importbootenv;" \
++                               "fi;" \
++                               "if test -n $uenvcmd; then " \
++                                       "echo Running uenvcmd ...;" \
++                                       "run uenvcmd;" \
++                               "fi;" \
++                               "if run loadimage; then " \
++                                       "setenv status FAIL;" \
++                                       "setenv stage 2;" \
++                                       "saveenv;" \
++                                       "if run loadramdisk; then " \
++                                               "setenv status FAIL;" \
++                                               "setenv stage 3;" \
++                                               "saveenv;" \
++                                               "run mmcloados;" \
++                                       "else " \
++                                               "setenv BOOT_FAILURE_COMMIT_ID ${commit_id};" \
++                                               "setenv BOOT_FAILURE_REASON ramdisk image not found/empty;" \
++                                               "saveenv;" \
++                                               "exit;" \
++                                       "fi;" \
++                               "else " \
++                                       "setenv BOOT_FAILURE_COMMIT_ID ${commit_id};" \
++                                       "setenv BOOT_FAILURE_REASON kernel image not found/empty;" \
++                                       "saveenv;" \
++                                       "exit;" \
++                               "fi;" \
++                       "fi;" \
++               "fi;\0" \
++
++#endif
++
+ #include "tegra-common-post.h"
+ 
+ /* Crystal is 38.4MHz. clk_m runs at half that rate */
+diff --git a/include/configs/tegra-common.h b/include/configs/tegra-common.h
+index f10e857..16fe331 100644
+--- a/include/configs/tegra-common.h
++++ b/include/configs/tegra-common.h
+@@ -34,7 +34,7 @@
+ 
+ /* Environment */
+ #define CONFIG_ENV_VARS_UBOOT_CONFIG
+-#define CONFIG_ENV_SIZE			0x2000	/* Total Size Environment */
++#define CONFIG_ENV_SIZE			0x4000	/* Total Size Environment */
+ 
+ /*
+  * NS16550 Configuration
+diff --git a/include/configs/tegra186-common.h b/include/configs/tegra186-common.h
+index 565bee0..ad172f1 100644
+--- a/include/configs/tegra186-common.h
++++ b/include/configs/tegra186-common.h
+@@ -60,7 +60,7 @@
+ 	"scriptaddr=0x90000000\0" \
+ 	"pxefile_addr_r=0x90100000\0" \
+ 	"kernel_addr_r=" __stringify(CONFIG_LOADADDR) "\0" \
+-	"fdt_addr_r=0x82000000\0" \
++	"fdt_addr_r=0x92000000\0" \
+ 	"ramdisk_addr_r=0x82100000\0"
+ 
+ /* Defines for SPL */
